@@ -54,8 +54,8 @@ def RawDataExtractor(scheduleImg):
         data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
 
         # print(f'Left extracted: {data['left']}')
-        # print(f'Top extracted: {data['top']}')
-        print(f'Text extracted: {data['text']}')
+        # print(f'Top extracted: {data['top']}')s
+        # print(f'Text extracted: {data['text']}')
 
         # ShowTextBounderies(data, img_cv)
 
@@ -65,26 +65,27 @@ def RawDataExtractor(scheduleImg):
         return 'Failed to extract text'
 
 def ScheduleProcessor(scheduleData):
-    # Days of the week in order
-    days_of_week = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     
     # Initialize an empty dictionary to store the parsed data
-    employee_schedule = {}
+    employeeSchedule = {}
 
     # for i, text in enumerate(scheduleData['text']):
       # For now, use hardcoded values
-    leftThreshold = 220
-    headerTop = 142
-    employeeNames = []
+    leftNameThreshold = 220
+    headerTopThreshold = 142
+    Employees = {}
+    # Days of the week in order
+    daysOfTheWeek = {"Mon": (0,0), "Tue": (0,0), "Wed": (0,0), "Thu": (0,0), "Fri": (0,0), "Sat": (0,0), "Sun": (0,0)}
+
 
     # TODO: Replace with runtime detection later
     # leftThreshold = detect_left_boundary(ocr_data)
     # headerTop = find_header_position(ocr_data)
 
+    # Grab All Employee Names & Coordinates AND Day of the Week Coordinates
     for i in range(0, len(scheduleData["text"])):
-
-        if(scheduleData['left'][i] < leftThreshold and scheduleData['top'][i] > headerTop and "," in scheduleData['text'][i]):
-            # nameIndicies.append(i)
+        #Names
+        if(scheduleData['left'][i] < leftNameThreshold and scheduleData['top'][i] > headerTopThreshold and "," in scheduleData['text'][i]):
             currIndex = i
             currentEmployeeParts = []
             while (currIndex < len(scheduleData["text"]) and scheduleData["text"][currIndex] != ''):
@@ -101,15 +102,55 @@ def ScheduleProcessor(scheduleData):
                 first_name = first_name.strip()
                 last_name = last_name.strip()
 
-            employeeNames.append(f"{first_name} {last_name}")
+            Employees[f"{first_name} {last_name}"] = {"coordinates": (scheduleData['left'][i], scheduleData['top'][i]), "TimeSlots": {}}
 
-    print(employeeNames)
+        #Day Coordinates
+        if scheduleData["text"][i] in daysOfTheWeek:
+            daysOfTheWeek[scheduleData["text"][i]] ={"coordinates": (scheduleData['left'][i], scheduleData['top'][i])}
+            
+    tolerance = 20
+
+    # print(Employees)
+    # print(daysOfTheWeek)
+
+    #Grab The Time-Slots
+    for employee, employeeData in Employees.items():
+        # print(f"Employee: {employee}, Data: {employeeData}")
+
+        employeeTop = employeeData["coordinates"][1]
+        # print(f"Employee Top: { employee[1][1]}")
+        for day, dateData in daysOfTheWeek.items():
+            dayLeft = dateData["coordinates"][0]
+            # print(f"Day Left: { day[1][0]}")
+            for i in range(len(scheduleData["text"])):
+                timeslotTop = scheduleData["top"][i]
+                timeslotLeft = scheduleData["left"][i]
+
+                if (abs(timeslotTop - employeeTop) <= tolerance and 
+                    abs(timeslotLeft - dayLeft) <= tolerance):
+
+                    # print(f"{scheduleData["text"][i]}")
+
+                    if scheduleData["text"][i].strip():  # Not empty
+                        #[day[0]] = (scheduleData["text"][i])
+                        employeeData["TimeSlots"][day] = scheduleData["text"][i]
+                        # print(f"{scheduleData["text"][i]}")
+                        # print(f"TimeSlots: {employeeData["TimeSlots"]}")
+            
+            
+            # if timeslots:
+            #     print(f"{employee[0]} on {day[0]}: {timeslots}")
+            # else:
+            #     print(f"{employee[0]} on {day[0]}: No shift")
+        print(f"Employee: {employee}, Data: {employeeData}")
+
+   
 
     # # Ensure the last employee is added to the schedule
     # if employee_name:
     #     employee_schedule[employee_name] = employee_shifts
     
-    return employee_schedule
+    return employeeSchedule
 
 def ShowTextBounderies(data, img_cv):
     for i in range(0, len(data["text"])):
