@@ -17,9 +17,6 @@ class Client(discord.Client):
         if message.author == self.user:
             return
 
-        if message.content.startswith('hello'):
-            await message.channel.send(f'Hi there {message.author} ')
-
         if message.attachments.__len__() > 0:
             currentImageFound = message.attachments[0]
 
@@ -110,45 +107,39 @@ def ScheduleProcessor(scheduleData):
             
     tolerance = 20
 
-    # print(Employees)
-    # print(daysOfTheWeek)
-
     #Grab The Time-Slots
     for employee, employeeData in Employees.items():
-        # print(f"Employee: {employee}, Data: {employeeData}")
-
         employeeTop = employeeData["coordinates"][1]
-        # print(f"Employee Top: { employee[1][1]}")
         for day, dateData in daysOfTheWeek.items():
             dayLeft = dateData["coordinates"][0]
-            # print(f"Day Left: { day[1][0]}")
             for i in range(len(scheduleData["text"])):
                 timeslotTop = scheduleData["top"][i]
                 timeslotLeft = scheduleData["left"][i]
 
                 if (abs(timeslotTop - employeeTop) <= tolerance and 
                     abs(timeslotLeft - dayLeft) <= tolerance):
-
-                    # print(f"{scheduleData["text"][i]}")
-
                     if scheduleData["text"][i].strip():  # Not empty
-                        #[day[0]] = (scheduleData["text"][i])
-                        employeeData["TimeSlots"][day] = scheduleData["text"][i]
-                        # print(f"{scheduleData["text"][i]}")
-                        # print(f"TimeSlots: {employeeData["TimeSlots"]}")
-            
-            
-            # if timeslots:
-            #     print(f"{employee[0]} on {day[0]}: {timeslots}")
-            # else:
-            #     print(f"{employee[0]} on {day[0]}: No shift")
-        print(f"Employee: {employee}, Data: {employeeData}")
+                        # employeeData["TimeSlots"][day] = scheduleData["text"][i]
 
-   
+                        startIdx = max(0, i - 3)
+                        endIdx = min(len(scheduleData["text"]), i + 3)
+    
+                        # Collect all non-empty text in the window
+                        timeElements = []
+                        for i in range(startIdx, endIdx):
+                            text = scheduleData["text"][i].strip()
+                            if text and text != '':
+                                timeElements.append(text)
+    
+                            # Join them and clean up
+                            fullTimeSlot = " ".join(timeElements)
 
-    # # Ensure the last employee is added to the schedule
-    # if employee_name:
-    #     employee_schedule[employee_name] = employee_shifts
+                        employeeData["TimeSlots"][day] = fullTimeSlot
+
+        # print(f"Employee: {employee}, Data: {employeeData}")
+
+        employeeSchedule[employee] = {"Schedule": employeeData["TimeSlots"]}
+        print(f"Employee: {employee}, Data: {employeeSchedule[employee]["Schedule"]}")
     
     return employeeSchedule
 
