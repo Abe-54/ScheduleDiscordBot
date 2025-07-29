@@ -4,7 +4,6 @@ from PIL import Image
 import pytesseract
 import requests
 from io import BytesIO
-import re
 from collections import defaultdict
 import cv2
 import numpy as np
@@ -22,13 +21,13 @@ class Client(discord.Client):
 
             print(f'Image found: {currentImageFound.url}')
 
-            await message.channel.send(f'Attachment found: {message.attachments[0].url}')
-
             await message.channel.send(f'Extracting Data from {currentImageFound.url}')
 
             rawData = RawDataExtractor(currentImageFound)
 
-            await message.channel.send(f'Processed Data: {ScheduleProcessor(rawData)}')
+            processedData = ScheduleProcessor(rawData)
+
+            await message.channel.send(f'Recieved Schedules From {processedData["Week"]["From"]} to {processedData["Week"]["To"]}')
 
 
             # await message.channel.send(f'Extracted text: {ScheduleExtractor(currentImageFound)}')
@@ -64,7 +63,7 @@ def RawDataExtractor(scheduleImg):
 def ScheduleProcessor(scheduleData):
     
     # Initialize an empty dictionary to store the parsed data
-    employeeSchedule = {}
+    employeeSchedule = {"Week": {}}
 
     # for i, text in enumerate(scheduleData['text']):
       # For now, use hardcoded values
@@ -75,12 +74,16 @@ def ScheduleProcessor(scheduleData):
     daysOfTheWeek = {"Mon": (0,0), "Tue": (0,0), "Wed": (0,0), "Thu": (0,0), "Fri": (0,0), "Sat": (0,0), "Sun": (0,0)}
 
 
-    # TODO: Replace with runtime detection later
-    # leftThreshold = detect_left_boundary(ocr_data)
-    # headerTop = find_header_position(ocr_data)
-
-    # Grab All Employee Names & Coordinates AND Day of the Week Coordinates
+    # Grab the Week, All Employee Names & Coordinates AND Day of the Week Coordinates
     for i in range(0, len(scheduleData["text"])):
+        #Week
+        if(scheduleData["text"][i] == "Schedules"):
+            fromDate = scheduleData["text"][i + 2]
+            toDate = scheduleData["text"][i + 4] 
+
+            employeeSchedule["Week"] = {"From": {f"{fromDate}"}, "To": {f"{toDate}"}}
+        
+
         #Names
         if(scheduleData['left'][i] < leftNameThreshold and scheduleData['top'][i] > headerTopThreshold and "," in scheduleData['text'][i]):
             currIndex = i
@@ -136,11 +139,10 @@ def ScheduleProcessor(scheduleData):
 
                         employeeData["TimeSlots"][day] = fullTimeSlot
 
-        # print(f"Employee: {employee}, Data: {employeeData}")
-
         employeeSchedule[employee] = {"Schedule": employeeData["TimeSlots"]}
-        print(f"Employee: {employee}, Data: {employeeSchedule[employee]["Schedule"]}")
     
+    print(f"All Data: {employeeSchedule}")
+
     return employeeSchedule
 
 def ShowTextBounderies(data, img_cv):
