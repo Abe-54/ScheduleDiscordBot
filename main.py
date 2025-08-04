@@ -49,11 +49,11 @@ def RawDataExtractor(scheduleImg):
         print('Extracting text from image')
         data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
 
-        # print(f'Left extracted: {data['left']}')
-        # print(f'Top extracted: {data['top']}')s
-        # print(f'Text extracted: {data['text']}')
+        print(f'Left extracted: {data["left"]}')
+        print(f'Top extracted: {data["top"]}')
+        print(f'Text extracted: {data["text"]}')
 
-        # ShowTextBounderies(data, img_cv)
+        ShowTextBounderies(data, img_cv)
 
         return data
     else:
@@ -124,8 +124,8 @@ def ScheduleProcessor(scheduleData):
                     if scheduleData["text"][i].strip():  # Not empty
                         # employeeData["TimeSlots"][day] = scheduleData["text"][i]
 
-                        startIdx = max(0, i - 3)
-                        endIdx = min(len(scheduleData["text"]), i + 3)
+                        startIdx = max(0, i - 4)
+                        endIdx = min(len(scheduleData["text"]), i + 4)
     
                         # Collect all non-empty text in the window
                         timeElements = []
@@ -137,7 +137,7 @@ def ScheduleProcessor(scheduleData):
                             # Join them and clean up
                             fullTimeSlot = " ".join(timeElements)
 
-                        employeeData["TimeSlots"][day] = fullTimeSlot
+                        employeeData["TimeSlots"][f"{day} {scheduleData['text'][dateData['Idx'] + 1]}"] = fullTimeSlot
 
         employeeSchedule[employee] = {"Schedule": employeeData["TimeSlots"]}
     
