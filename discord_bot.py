@@ -1,26 +1,36 @@
 import discord
+from discord.ext import commands
+from discord import app_commands
 from data_processor import ScheduleDataProcessor
 from typing import Optional
 
 
-class DiscordBot(discord.Client):
+class DiscordBot(commands.Bot):
     """Discord bot for processing schedule images."""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.processor = ScheduleDataProcessor()
+        self.schedules = {}  # Store extracted schedules
+        self.current_week = None  # Store current week info
     
     async def on_ready(self):
         """Called when the bot is ready."""
         print(f'Logged on as {self.user}!')
+
+        try:
+            guild = discord.Object(id=1328907522299658260)
+            synced= await self.tree.sync(guild=guild)
+            print(f"Synced {len(synced)} commands to guild {guild.id}")
+
+        except Exception as e:
+            print(f'Error syncing commands: {e}')
     
     async def on_message(self, message: discord.Message):
         """Handle incoming messages."""
         # Ignore messages from the bot itself
         if message.author == self.user:
             return
-        
-        # print(f'Message from {message.author}: {message.content}')
         
         # Process image attachments
         if message.attachments:
@@ -31,44 +41,34 @@ class DiscordBot(discord.Client):
         attachment = message.attachments[0]
         print(f'Image found: {attachment.url}')
         
-        await message.channel.send(f'Extracting data from {attachment.url}')
+        # Send loading message with single emoji
+        loading_msg = await message.channel.send('🔄 Extracting data from image...')
         
-        try:
-            # Extract and process schedule data
-            data = await self.processor.extract_schedule_with_ai(attachment.url)
-            print(f"Extracted Data: {data}")
-            if not data:
-                await message.channel.send('Failed to extract data from image.')
-                return
-            
-            # Send confirmation message
-            week_info = data["Week"]
-            from_date = week_info.get("From", "Unknown")
-            to_date = week_info.get("To", "Unknown")
+        # Start typing indicator
+        async with message.channel.typing():
+            try:
+                # Extract and process schedule data
+                data = await self.processor.extract_schedule_with_ai(attachment.url)
+                print(f"Extracted Data: {data}")
+                
+                if not data:
+                    await loading_msg.edit(content='❌ Failed to extract data from image.')
+                    return
 
-            employee_info = data["Employees"]
-            
-            await message.channel.send(
-                f'Received schedules for {len(employee_info)} employees from {from_date} to {to_date}'
-            )
-            
-            # TODO: Add more functionality here (save to database, format output, etc.)
-            
-        except Exception as e:
-            print(f'Error processing image: {e}')
-            await message.channel.send('An error occurred while processing the image.')
-    
-    # Future command methods can be added here
-    async def setup_commands(self):
-        """Setup slash commands (for future implementation)."""
-        pass
-    
-    async def handle_schedule_query(self, employee_name: str) -> Optional[str]:
-        """Handle schedule queries for specific employees (future feature)."""
-        # TODO: Implement database lookup for employee schedules
-        pass
-    
-    async def handle_schedule_export(self, format_type: str = "json") -> Optional[str]:
-        """Export schedule data in various formats (future feature)."""
-        # TODO: Implement schedule export functionality
-        pass
+                self.current_week = data["Week"]
+                self.schedules = data["Employees"]
+                
+                # Edit message with success
+                week_info = data["Week"]
+                from_date = week_info.get("From", "Unknown")
+                to_date = week_info.get("To", "Unknown")
+                employee_count = len(data["Employees"])
+                
+                await loading_msg.edit(content=
+                    f'✅ Loaded schedules for {employee_count} employees from {from_date} to {to_date}\n'
+                    f'Use `/help` to see available commands!'
+                )
+                
+            except Exception as e:
+                print(f'Error processing image: {e}')
+                await loading_msg.edit(content='❌ An error occurred while processing the image.')
