@@ -1,168 +1,93 @@
+from google import genai
 import requests
-import pytesseract
-import cv2
-import numpy as np
+import os
+from typing import List, Optional
 from PIL import Image
-from io import BytesIO
-from typing import Dict, Any, Optional
+import io
+from pydantic import BaseModel, Field
+import json
 
+class Week(BaseModel):
+    from_date: str = Field(alias="from")
+    to_date: str = Field(alias="to")
+
+class Employee(BaseModel):
+    name: str
+    Monday: Optional[str] = None
+    Tuesday: Optional[str] = None
+    Wednesday: Optional[str] = None
+    Thursday: Optional[str] = None
+    Friday: Optional[str] = None
+    Saturday: Optional[str] = None
+    Sunday: Optional[str] = None
+
+class Schedule(BaseModel):
+    week: Week
+    employees: List[Employee]  # Changed from Dict to List
 
 class ScheduleDataProcessor:
-    """Handles OCR extraction and schedule data processing."""
-    
     def __init__(self):
-        self.left_name_threshold = 220
-        self.header_top_threshold = 142
-        self.tolerance = 20
-        self.days_of_week = [
-            "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
-        ]
+        self.client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
     
-    def extract_raw_data(self, image_url: str) -> Optional[Dict[str, Any]]:
-        """Extract raw OCR data from image URL."""
+    async def extract_schedule_with_ai(self, image_url: str) -> Optional[dict]:
+        """Extract schedule using Gemini Vision with structured output."""
+        
+        # Step 1: Download and convert image
         try:
+            print(f"Downloading image from: {image_url}")
             response = requests.get(image_url)
-            if response.status_code != 200:
-                print(f'Error downloading image: {response.status_code}')
-                return None
+            response.raise_for_status()
+            pil_image = Image.open(io.BytesIO(response.content))
+            print(f"Image ready: {pil_image.format}, Size: {pil_image.size}")
+        except Exception as img_err:
+            print(f"Error processing image: {img_err}")
+            return None
+        
+        # Step 2: Call Gemini API with structured output
+        try:
+            prompt = """
+            Extract the work schedule from this image.
+            Include the week date range and each employee's daily work hours.
+            Use null for days when employees are not working.
+            Include any notes like PTO or sick days in the time slot.
+            For each employee, include their name and their schedule for each day of the week.
+            """
             
-            print(f'Extracting text from {image_url}')
-            img = Image.open(BytesIO(response.content))
-            
-            # Convert PIL Image to OpenCV format
-            img_cv = np.array(img)
-            img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
-            
-            print('Running OCR on image')
-            data = pytesseract.image_to_data(
-                img, output_type=pytesseract.Output.DICT
+            print("Calling Gemini API...")
+            gemini_response = self.client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[prompt, pil_image],
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": Schedule,
+                }
             )
             
-            # Optionally show text boundaries for debugging
-            # self._show_text_boundaries(data, img_cv)
+            # Use the parsed response directly
+            schedule: Schedule = gemini_response.parsed
+            employee_count = len(schedule.employees)
+            print(f"Successfully extracted schedule with {employee_count} employees")
             
-            return data
-            
-        except Exception as e:
-            print(f'Error extracting data: {e}')
-            return None
-    
-    def process_schedule(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process raw OCR data into structured schedule format."""
-        if not raw_data:
-            return {}
-        
-        schedule = {"Week": {}, "Employees":{}}
-        employees = {}
-        day_coordinates = {}
-        
-        # Extract week dates, employee names, and day coordinates
-        self._extract_week_info(raw_data, schedule)
-        self._extract_employees(raw_data, employees)
-        self._extract_day_coordinates(raw_data, day_coordinates)
-        
-        # Extract time slots for each employee
-        self._extract_time_slots(raw_data, employees, day_coordinates)
-        
-        # Format final schedule
-        for employee, data in employees.items():
-            schedule["Employees"][employee] = {"Schedule": data["TimeSlots"]}
-        
-        print(f"Processed schedule data: {schedule}")
-        return schedule
-    
-    def _extract_week_info(self, data: Dict[str, Any], schedule: Dict[str, Any]):
-        """Extract week date range from OCR data."""
-        for i, text in enumerate(data["text"]):
-            if text == "Schedules" and i + 4 < len(data["text"]):
-                from_date = data["text"][i + 2]
-                to_date = data["text"][i + 4]
-                schedule["Week"] = {"From": from_date, "To": to_date}
-                break
-    
-    def _extract_employees(self, data: Dict[str, Any], employees: Dict[str, Any]):
-        """Extract employee names and their coordinates."""
-        for i, text in enumerate(data["text"]):
-            if (data['left'][i] < self.left_name_threshold and 
-                data['top'][i] > self.header_top_threshold and 
-                "," in text):
-                
-                # Collect full employee name
-                curr_index = i
-                name_parts = []
-                while (curr_index < len(data["text"]) and 
-                       data["text"][curr_index] != ''):
-                    name_parts.append(data["text"][curr_index].strip())
-                    curr_index += 1
-                
-                full_name = " ".join(name_parts).strip()
-                
-                if ", " in full_name:
-                    parts = full_name.split(", ", 1)
-                    if len(parts) == 2:
-                        last_name, first_name = parts
-                        formatted_name = f"{first_name.strip()} {last_name.strip()}"
-                        
-                        employees[formatted_name] = {
-                            "coordinates": (data['left'][i], data['top'][i]),
-                            "TimeSlots": {}
-                        }
-    
-    def _extract_day_coordinates(self, data: Dict[str, Any], day_coordinates: Dict[str, Any]):
-        """Extract day of week coordinates."""
-        for i, text in enumerate(data["text"]):
-            if text in self.days_of_week:
-                day_coordinates[text] = {
-                    "coordinates": (data['left'][i], data['top'][i]),
-                    "index": i
+            # Convert to your original dict format for Discord bot compatibility
+            return {
+                "Week": {
+                    "From": schedule.week.from_date,
+                    "To": schedule.week.to_date
+                },
+                "Employees": {
+                    emp.name: {
+                        "Monday": emp.Monday,
+                        "Tuesday": emp.Tuesday,
+                        "Wednesday": emp.Wednesday,
+                        "Thursday": emp.Thursday,
+                        "Friday": emp.Friday,
+                        "Saturday": emp.Saturday,
+                        "Sunday": emp.Sunday,
+                    }
+                    for emp in schedule.employees
                 }
-    
-    def _extract_time_slots(self, data: Dict[str, Any], employees: Dict[str, Any], 
-                           day_coordinates: Dict[str, Any]):
-        """Extract time slots for each employee and day."""
-        for employee, employee_data in employees.items():
-            employee_top = employee_data["coordinates"][1]
+            }
             
-            for day, day_data in day_coordinates.items():
-                day_left = day_data["coordinates"][0]
-                
-                for i in range(len(data["text"])):
-                    slot_top = data["top"][i]
-                    slot_left = data["left"][i]
-                    
-                    if (abs(slot_top - employee_top) <= self.tolerance and 
-                        abs(slot_left - day_left) <= self.tolerance):
-                        
-                        if data["text"][i].strip():
-                            time_slot = self._collect_time_elements(data, i)
-                            date_info = data['text'][day_data['index'] + 1] if day_data['index'] + 1 < len(data['text']) else ""
-                            employee_data["TimeSlots"][f"{day} {date_info}"] = time_slot
-    
-    def _collect_time_elements(self, data: Dict[str, Any], center_index: int) -> str:
-        """Collect time elements around a center index."""
-        start_idx = max(0, center_index - 4)
-        end_idx = min(len(data["text"]), center_index + 4)
-        
-        time_elements = []
-        for i in range(start_idx, end_idx):
-            text = data["text"][i].strip()
-            if text:
-                time_elements.append(text)
-        
-        return " ".join(time_elements)
-    
-    def _show_text_boundaries(self, data: Dict[str, Any], img_cv: np.ndarray):
-        """Display text boundaries for debugging (optional)."""
-        for i in range(len(data["text"])):
-            x, y = data["left"][i], data["top"][i]
-            w, h = data["width"][i], data["height"][i]
-            conf = int(data["conf"][i])
-            
-            if conf > 70:
-                cv2.rectangle(img_cv, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(img_cv, f"{x},{y}", (x, y - 10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 2)
-        
-        cv2.imshow('Image', img_cv)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        except Exception as gemini_err:
+            print(f"Error calling Gemini API: {gemini_err}")
+            return None

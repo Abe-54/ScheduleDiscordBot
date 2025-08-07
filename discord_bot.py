@@ -35,22 +35,18 @@ class DiscordBot(discord.Client):
         
         try:
             # Extract and process schedule data
-            raw_data = self.processor.extract_raw_data(attachment.url)
-            if not raw_data:
+            data = await self.processor.extract_schedule_with_ai(attachment.url)
+            print(f"Extracted Data: {data}")
+            if not data:
                 await message.channel.send('Failed to extract data from image.')
                 return
             
-            processed_data = self.processor.process_schedule(raw_data)
-            if not processed_data or "Week" not in processed_data:
-                await message.channel.send('Failed to process schedule data.')
-                return
-            
             # Send confirmation message
-            week_info = processed_data["Week"]
+            week_info = data["Week"]
             from_date = week_info.get("From", "Unknown")
             to_date = week_info.get("To", "Unknown")
 
-            employee_info = processed_data["Employees"]
+            employee_info = data["Employees"]
             
             await message.channel.send(
                 f'Received schedules for {len(employee_info)} employees from {from_date} to {to_date}'
