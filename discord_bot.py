@@ -1,9 +1,6 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 from data_processor import ScheduleDataProcessor
-from typing import Optional
-
 
 class DiscordBot(commands.Bot):
     """Discord bot for processing schedule images."""
@@ -25,7 +22,7 @@ class DiscordBot(commands.Bot):
 
         except Exception as e:
             print(f'Error syncing commands: {e}')
-    
+
     async def on_message(self, message: discord.Message):
         """Handle incoming messages."""
         # Ignore messages from the bot itself

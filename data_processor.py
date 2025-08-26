@@ -5,7 +5,6 @@ from typing import List, Optional
 from PIL import Image
 import io
 from pydantic import BaseModel, Field
-import json
 
 class Week(BaseModel):
     from_date: str = Field(alias="from")
