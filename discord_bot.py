@@ -1,9 +1,12 @@
 import discord
 from discord.ext import commands
 from data_processor import ScheduleDataProcessor
+import asyncio
 
 class DiscordBot(commands.Bot):
     """Discord bot for processing schedule images."""
+
+    selected_employee = ""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -29,43 +32,59 @@ class DiscordBot(commands.Bot):
         if message.author == self.user:
             return
         
-        # Process image attachments
-        if message.attachments:
-            await self._process_image_attachment(message)
+        # # Process image attachments
+        # if message.attachments:
+        #     await self._process_image_attachment(message)
     
-    async def _process_image_attachment(self, message: discord.Message):
-        """Process the first image attachment in a message."""
-        attachment = message.attachments[0]
-        print(f'Image found: {attachment.url}')
+    async def _process_image_attachment(self, scheduleImage: discord.Attachment, interaction: discord.Interaction):
+        await interaction.response.defer()
         
-        # Send loading message with single emoji
-        loading_msg = await message.channel.send('🔄 Extracting data from image...')
+        # Create a task to keep typing indicator alive
+        typing_task = asyncio.create_task(self._keep_typing(interaction.channel))
         
-        # Start typing indicator
-        async with message.channel.typing():
-            try:
-                # Extract and process schedule data
-                data = await self.processor.extract_schedule_with_ai(attachment.url)
-                print(f"Extracted Data: {data}")
-                
-                if not data:
-                    await loading_msg.edit(content='❌ Failed to extract data from image.')
-                    return
+        try:
+            # Extract and process schedule data
+            data = await self.processor.extract_schedule_with_ai(scheduleImage.url)
+            print(f"Extracted Data: {data}")
+            
+            # Stop the typing indicator
+            typing_task.cancel()
+            
+            if not data:
+                await interaction.followup.send('❌ Failed to extract data from image.')
+                return
 
-                self.current_week = data["Week"]
-                self.schedules = data["Employees"]
-                
-                # Edit message with success
-                week_info = data["Week"]
-                from_date = week_info.get("From", "Unknown")
-                to_date = week_info.get("To", "Unknown")
-                employee_count = len(data["Employees"])
-                
-                await loading_msg.edit(content=
-                    f'✅ Loaded schedules for {employee_count} employees from {from_date} to {to_date}\n'
-                    f'Use `/help` to see available commands!'
-                )
-                
-            except Exception as e:
-                print(f'Error processing image: {e}')
-                await loading_msg.edit(content='❌ An error occurred while processing the image.')
+            self.current_week = data["Week"]
+            self.schedules = data["Employees"]
+            
+            # Send success message
+            week_info = data["Week"]
+            from_date = week_info.get("From", "Unknown")
+            to_date = week_info.get("To", "Unknown")
+            employee_count = len(data["Employees"])
+            
+            await interaction.followup.send(
+                f'✅ Loaded schedules for {employee_count} employees from {from_date} to {to_date}\n'
+                f'Use `/help` to see available commands!'
+            )
+            
+        except Exception as e:
+            typing_task.cancel()
+            print(f'Error processing image: {e}')
+            await interaction.followup.send('❌ An error occurred while processing the image.')
+
+    async def _keep_typing(self, channel):
+        """Keep the typing indicator active."""
+        try:
+            while True:
+                async with channel.typing():
+                    await asyncio.sleep(8)  # Refresh every 8 seconds
+        except asyncio.CancelledError:
+            pass  # Task was cancelled, stop typing
+    
+    def get_selected_employee(self):
+        return self.selected_employee
+    
+    def set_selected_employee(self, employee):
+        self.selected_employee = employee
+        print(f'New Selected Employee: {self.selected_employee}')
