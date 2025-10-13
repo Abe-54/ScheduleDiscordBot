@@ -1,4 +1,6 @@
+import datetime
 import os
+from typing import Optional
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -43,3 +45,36 @@ def test_calendar_connection():
     calendars = service.calendarList().list().execute()
 
     return [cal["summary"] for cal in calendars.get("items", [])]
+
+def is_calandar_connected():
+    return os.path.exists("token.json")
+
+def add_event_to_new_calendar(user_id: int, description: str, start_time: datetime, end_time: datetime, calendar: Optional[dict] = None):
+    
+    creds = get_credentials()
+    service = build("calendar", "v3", credentials=creds)
+
+    if calendar is None:
+        calendar = {
+            'summary' : 'Work Schedule Calendar',
+            'timeZone' : 'America/New_York'
+        }
+        
+        new_calendar = service.calendars().insert(body=calendar).execute()
+        calendar_id = new_calendar["id"]
+        print(f"Created calendar: {calendar_id}")
+    else:
+        calendar_id = calendar["id"]
+    
+    shift = {
+        "summary": "Work Shift",
+        "description": description,
+        "start": {"dateTime": start_time.isoformat(), "timeZone": "America/New_York"},
+        "end": {"dateTime": end_time.isoformat(), "timeZone": "America/New_York"},
+    }
+    
+    event = (
+        service.events().insert(calendarId=calendar_id, body=shift).execute()
+    )   
+
+    return event

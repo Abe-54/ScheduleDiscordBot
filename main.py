@@ -1,7 +1,9 @@
 import discord
-from discord_bot import DiscordBot
-from calendar_auth import test_calendar_connection, get_credentials
+import pytz
 import os
+from discord_bot import DiscordBot
+from calendar_auth import test_calendar_connection, get_credentials, add_event_to_new_calendar, is_calandar_connected
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from discord import app_commands
 
@@ -82,33 +84,47 @@ def main():
     
     @bot.tree.command(name="sync_calendar", description="Sync an employee's schedule to your calendar", guild=GUILD_ID)
     @app_commands.describe(employee_name="The employee whose schedule you want to sync")
-    async def syncCalendarCommand(interaction: discord.Interaction, employee_name: str):
+    async def syncWorkCalendarCommand(interaction: discord.Interaction, employee_name: str):
         """Sync selected employee schedule to user's Google Calendar"""
         user_id = interaction.user.id
 
-        # Find employee
+        if not hasattr(bot, "schedules") or not bot.schedules:
+            await interaction.response.send_message(
+                "❌ No schedule data loaded. Upload a schedule first!", ephemeral=True
+            )
+            return
+
         employee_schedule = _find_employee(bot, employee_name)
         if not employee_schedule:
-            await interaction.response.send_message(f"❌ Employee '{employee_name}' not found!", ephemeral=True)
+            await interaction.response.send_message(
+                f"❌ Employee '{employee_name}' not found!", ephemeral=True
+            )
+            return
+        
+        if not is_calandar_connected:
+            await interaction.response.send_message(f"❌ Please connect your google calandar account first!", ephemeral=True)
             return
 
         # Loop over days, add events
-        from datetime import datetime
         results = []
+        week_start = datetime.strptime(bot.current_week["From"], "%m/%d/%Y")
+
         for day, times in employee_schedule["schedule"].items():
             if not times: 
                 continue
             
             # Example: "09:00 AM - 05:00 PM"
             try:
-                start_str, _, end_str = times.split(" ", 2)
-                # Convert to real datetime (MVP: pick a sample week, parse with strptime)
+                parts = times.split("-")
+                start_str, end_str = parts[0].strip(), parts[1].strip()
+                start_time = _combine_day_and_time(week_start, day, start_str)
+                end_time   = _combine_day_and_time(week_start, day, end_str)
 
-                start_time = "2025-09-23T09:00:00-04:00"
-                end_time   = "2025-09-23T17:00:00-04:00"
-
-                link = add_event_to_calendar(user_id, f"{employee_name} shift", start_time, end_time)
-                results.append(f"📅 {day}: synced -> {link}")
+                event = add_event_to_new_calendar(
+                    user_id, f"{employee_name} shift", start_time, end_time
+                )
+                link = event.get("htmlLink", "(no link)")
+                results.append(f"✅ {day}: synced → {link}")
             except:
                 results.append(f"⚠️ Could not sync {day}: {times}")
 
@@ -126,7 +142,6 @@ def _find_employee(bot, search_name: str) -> dict:
     
     return None
 
-
 def _format_employee_schedule(self, name: str, schedule: dict) -> str:
     """Format employee schedule for display."""
     week_info = f"**Week:** {self.current_week['From']} to {self.current_week['To']}" if self.current_week else ""
@@ -142,6 +157,16 @@ def _format_employee_schedule(self, name: str, schedule: dict) -> str:
             schedule_lines.append(f"**{day}:** Off")
     
     return f"**{name}**\n" + "\n".join(schedule_lines)
+
+def _combine_day_and_time(week_start, day_name, time_str):
+    # Map weekday strings to offsets
+    day_index = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"].index(day_name)
+    tz = pytz.timezone("America/New_York")
+
+    # Trim things like "09:00 AM"
+    t = datetime.strptime(time_str.strip(), "%I:%M %p").time()
+    dt = datetime.combine(week_start + timedelta(days=day_index), t)
+    return tz.localize(dt)
 
 if __name__ == "__main__":
     main()

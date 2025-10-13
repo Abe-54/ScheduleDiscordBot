@@ -5,6 +5,8 @@ import asyncio
 
 class DiscordBot(commands.Bot):
     """Discord bot for processing schedule images."""
+
+    selected_employee = ""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -79,3 +81,10 @@ class DiscordBot(commands.Bot):
                     await asyncio.sleep(8)  # Refresh every 8 seconds
         except asyncio.CancelledError:
             pass  # Task was cancelled, stop typing
+    
+    def get_selected_employee(self):
+        return self.selected_employee
+    
+    def set_selected_employee(self, employee):
+        self.selected_employee = employee
+        print(f'New Selected Employee: {self.selected_employee}')
