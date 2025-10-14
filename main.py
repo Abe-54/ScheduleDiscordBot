@@ -2,10 +2,11 @@ import discord
 import pytz
 import os
 from discord_bot import DiscordBot
-from calendar_auth import test_calendar_connection, get_credentials, add_event_to_new_calendar, is_calandar_connected
+from calendar_api import create_new_calendar, get_primary_calendar, test_calendar_connection, get_credentials, add_event_to_new_calendar
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from discord import app_commands
+from discord_view import ConfirmView
 
 load_dotenv()
 
@@ -73,15 +74,15 @@ def main():
         """Connect only *your* account to Google Calendar."""
         await interaction.response.send_message("🔄 Connecting to Google Calendar...")
 
-        try:
-            # Auth flow runs in console/browser
-            calendars = test_calendar_connection()
+        is_connected = test_calendar_connection()
+
+        if is_connected:
+            await interaction.followup.send("✅ Successfully connected to Google Calendar!")
+        else:
             await interaction.followup.send(
-                f"✅ Connected to Google! Available calendars: {', '.join(calendars)}"
-            )
-        except Exception as e:
-            await interaction.followup.send(f"❌ Failed to connect: {e}")
-    
+                "❌ Failed to connect to Google Calendar. Check logs for error details."
+        )
+            
     @bot.tree.command(name="sync_calendar", description="Sync an employee's schedule to your calendar", guild=GUILD_ID)
     @app_commands.describe(employee_name="The employee whose schedule you want to sync")
     async def syncWorkCalendarCommand(interaction: discord.Interaction, employee_name: str):
@@ -101,13 +102,42 @@ def main():
             )
             return
         
-        if not is_calandar_connected:
-            await interaction.response.send_message(f"❌ Please connect your google calandar account first!", ephemeral=True)
+        is_connected = test_calendar_connection()
+
+        if not is_connected:
+            await interaction.followup.send(
+                "❌ Failed to connect to Google Calendar.", ephemeral=True
+            )  
             return
 
         # Loop over days, add events
         results = []
         week_start = datetime.strptime(bot.current_week["From"], "%m/%d/%Y")
+
+        # Ask the user if they want to use their primary calendar - Y/N
+        view = ConfirmView()
+        await interaction.response.send_message(
+            "Would you like to use your **primary calendar**?",
+            view=view,
+            ephemeral=True,
+        )
+
+        await view.wait()  # Wait for user to click
+
+        use_primary = view.value
+        calendar_id = None
+        calender_name = None
+
+        if use_primary:
+            calendar_id = 'primary'
+            calender_name = get_primary_calendar().get("summary")
+        else:
+            new_calendar = create_new_calendar()
+
+            calendar_id = new_calendar["id"]
+            calender_name = new_calendar["summary"]
+
+        await interaction.followup.send(f"⏳ Syncing events using {calender_name} ...", ephemeral=True)
 
         for day, times in employee_schedule["schedule"].items():
             if not times: 
@@ -121,14 +151,14 @@ def main():
                 end_time   = _combine_day_and_time(week_start, day, end_str)
 
                 event = add_event_to_new_calendar(
-                    user_id, f"{employee_name} shift", start_time, end_time
+                    user_id, f"{employee_name} shift", start_time, end_time, calendar_id
                 )
                 link = event.get("htmlLink", "(no link)")
                 results.append(f"✅ {day}: synced → {link}")
             except:
                 results.append(f"⚠️ Could not sync {day}: {times}")
 
-        await interaction.response.send_message("\n".join(results))
+        await interaction.followup.send("\n".join(results))
 
     bot.run(os.getenv('DISCORD_TOKEN'))
 
