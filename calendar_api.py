@@ -5,6 +5,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
+import pytz
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
@@ -14,15 +15,28 @@ def get_credentials(force_refresh: bool = False):
     Only for MVP -> one local user (you).
     """
     token_path = "tokens/token.json"
-
-    # Load saved token if exists
+    client_secret_path = "credentials.json"
     creds = None
+
+    os.makedirs(os.path.dirname(token_path), exist_ok=True)
+
     if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        try:
+            # Check if file is empty or just "{}"
+            with open(token_path, "r") as f:
+                content = f.read().strip()
+                if not content or content == "{}":
+                    raise ValueError("Token file is empty or blank JSON.")
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        except Exception as e:
+            print(f"Invalid or empty token file — regenerating ({e})")
+            creds = None
+    else:
+        print("Token file not found — creating a new one.")
     
     if force_refresh:
         print("🔄 Forcing credentials refresh...")
-        flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
         creds = flow.run_local_server(port=0)
         with open(token_path, "w") as token:
             token.write(creds.to_json())
@@ -35,7 +49,7 @@ def get_credentials(force_refresh: bool = False):
             creds.refresh(Request())  # auto refresh
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
+                client_secret_path, SCOPES
             )
             creds = flow.run_local_server(port=0)  # opens browser
         # Save for next time
@@ -63,7 +77,7 @@ def test_calendar_connection() -> bool:
         print(f"Error: {e}")
         return False
 
-def create_new_calendar(title: Optional[str] = "Schedule Calendar"):
+def create_new_calendar(title: Optional[str] = "Work Schedule"):
     creds = get_credentials()
     service = build("calendar", "v3", credentials=creds)
 
@@ -84,6 +98,23 @@ def get_primary_calendar():
 
     return service.calendars().get(calendarId="primary").execute()
 
+def get_calendar_list():
+    creds = get_credentials()
+    service = build("calendar", "v3", credentials=creds)
+
+    calendars = None
+
+    try:
+        calendars = service.calendarList().list().execute()
+        print("Calendars found:", [cal["summary"] for cal in calendars.get("items", [])])
+    
+    except Exception as e:
+        print("Failed to connect to Google Calendar API.")
+        print(f"Error: {e}")
+        return calendars
+
+    return calendars.get("items", [])
+
 def add_event_to_new_calendar(user_id: int, description: str, start_time: datetime, end_time: datetime, calendar_id: str):
     
     creds = get_credentials()
@@ -103,3 +134,29 @@ def add_event_to_new_calendar(user_id: int, description: str, start_time: dateti
     )   
 
     return event
+
+def get_events_between( calendar_id: str, time_min: datetime, time_max: datetime, tz_name: str = "America/New_York"):
+    """Return events between two datetimes (inclusive) from a calendar."""
+    creds = get_credentials()
+    service = build("calendar", "v3", credentials=creds)
+    tz = pytz.timezone(tz_name)
+
+    # Ensure both datetimes are localized
+    if time_min.tzinfo is None:
+        time_min = tz.localize(time_min)
+    if time_max.tzinfo is None:
+        time_max = tz.localize(time_max)
+
+    events_result = (service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat(),
+            timeMax=time_max.isoformat(),
+            timeZone="UTC",
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+    )
+
+    return events_result.get("items", [])
